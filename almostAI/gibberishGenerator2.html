@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body onload="onload()">
+    <input type="text" id="startingSegment" placeholder="startingSegment" onchange="setStartingSegment(this.value)">
+    <input type="file" onchange="loadFile(this.files[0])">
+    <button onclick="process()">Process</button>
+    <button onclick="generate()">Generate</button>
+    <p id="output"></p>
+
+    <script src="../util/classPackage.js"></script>
+    <script src="../util/utilFunctions.js"></script>
+
+    <script>
+        class SegmentConnection {
+            segments = new Set();
+            weights = {};
+
+            add(segment) {
+                if (!this.segments.has(segment)) {
+                    this.segments.add(segment);
+                    this.weights[segment] = 0;
+                }
+
+                this.weights[segment]++;
+            }
+
+            toString() {
+                let segments = this.segments;
+                let weights = this.weights;
+
+                let str = "";
+
+                for (let segment of segments) {
+                    str += `${segment}: ${weights[segment]}\n`
+                }
+
+                return str;
+            }
+
+            setWeightSum() {
+                let segments = this.segments;
+                let weights = this.weights;
+
+                let sum = 0;
+
+                for (let segment of segments) {
+                    sum += weights[segment];
+                }
+
+                this.weightSum = sum;
+            }
+
+            weightedRandomSegment(bias) {
+                let segments = this.segments;
+                let weights = this.weights;
+
+                let weightSum = this.weightSum;
+                let random = Math.floor(Math.random() * weightSum);
+
+                let pointer = 0;
+
+                for (let segment of segments) {
+                    pointer += weights[segment];
+
+                    if (pointer > random - Math.random() * bias) {
+                        return segment;
+                    }
+                }
+            }
+        }
+
+        let startingSegment = "The";
+        let outputLength = 250;
+        let bias = 0.5;
+        
+        let inputText = "";
+        let delimiter = " ";
+
+        let connections = {};
+        let foundSegments = new Set();
+        let foundSegmentsArray = [];
+
+        function setStartingSegment(segment) {
+            startingSegment = segment;
+        }
+
+        function setInputText(text) {
+            inputText = removeNewLines(text);
+        }
+
+        async function loadFile(file) {
+            setInputText(await file.text());
+            Terminal.print(`File "${await file.name}" loaded as source string.`);
+        }
+
+        function randomSegment() {
+            return foundSegmentsArray[Math.floor(Math.random() * foundSegmentsArray.length)];
+        }
+
+        function updateConnection(selectedSegment, followingSegment) {
+            if (!connections[selectedSegment]) {
+                connections[selectedSegment] = new SegmentConnection();
+            }
+
+            connections[selectedSegment].add(followingSegment);
+        }
+
+        function onload() {
+            Terminal.init();
+            Terminal.setOpacity(1.0);
+            Terminal.setTextColor([255, 255, 255, 1]);
+            Terminal.clear();
+            Terminal.print("### VERSION 2 ###");
+            Terminal.newLine()
+            Terminal.print("Time shown in ms");
+            setInputText("The sun dipped below the horizon, casting an orange glow across the sky. As the evening breeze picked up, the scent of pine trees mixed with the faint hum of distant waves crashing against the shore. The world seemed to slow down, as if the day itself were taking a deep breath before surrendering to the calm of the night. Birds called to each other in the distance, their silhouettes darting between the trees, while the air grew cooler, hinting at the night to come. It was the perfect moment for reflection, where time stood still, and everything felt connected in the quiet beauty of nature.");
+        }
+
+        function process() {
+            let benchmarker = new Benchmarker("Processing");
+
+            let broken = inputText.split(delimiter);
+            let brokenLength = broken.length;
+
+            let order = 2;
+
+            for (let i = 0; i < brokenLength; i++) {
+                let selectedSegment = broken[i];
+
+                let followingSegment = broken[(i + 1) % brokenLength];
+                updateConnection(selectedSegment, followingSegment);
+
+                foundSegments.add(selectedSegment);
+            }
+
+            for (let segment of foundSegments) {
+                connections[segment].setWeightSum();
+            }
+
+            Terminal.print("Total time to load: " + benchmarker.fromInitialization());
+
+            foundSegmentsArray = [...foundSegments];
+
+            Terminal.print("Total Segments: " + foundSegmentsArray.length.toLocaleString());
+            Terminal.presetPrintLink("Connections", JSON.stringify(connections));
+        }
+
+        function generate() {
+            let generated = predict(startingSegment, outputLength);
+
+            if (outputLength < 10000) {
+                document.getElementById('output').textContent = generated;
+            } else {
+                Terminal.presetPrintLink("Output txt", generated);
+            }
+
+            Terminal.presetPrintLink("~~download output~~", generated, "src");
+            Terminal.newLine();
+            Terminal.generateSaveLink();
+        }
+
+        function predict(startingSegment, length, bias) {
+            if (foundSegments.size == 0) {
+                return "";
+            }
+
+            let benchmarker = new Benchmarker("General");
+            
+            let current = foundSegments.has(startingSegment) ? startingSegment : randomSegment();
+
+            let output = [];
+
+            for (let i = 0; i < length; i++) {
+                let currConnection = connections[current];
+                let weightedRandomSegment = currConnection.weightedRandomSegment(bias);
+
+                output[i] = current;
+                current = foundSegments.has(weightedRandomSegment) ? weightedRandomSegment : randomSegment();
+            }
+
+            let joined = output.join(delimiter);
+
+            let fromInitialization = benchmarker.fromInitialization();
+
+            Terminal.print("Average time per segment: " + (fromInitialization / outputLength));
+            Terminal.print("Total time to generate: " + fromInitialization);
+            Terminal.print("Total Segments: " + outputLength);
+
+            return join;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    
+    <style>
+        body {
+            margin: 0;
+            padding: none;
+            overflow-y: hidden;
+        }
+    </style>
+</head>
+<body onload="onload()"> 
+    <canvas id="canvas" style="width: 500px; height: 500px;"></canvas>
+
+    <script src="../util/classPackage.js"></script>
+    <script src="../util/utilFunctions.js"></script>
+
+    <script>
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+
+        let globalSeed = Math.random();
+
+        let loop;
+        let tickRate = 16;
+        let tick = 0;
+        let dt = 1;
+
+        let resolutionScale = 0.5;
+
+        let perlin;
+
+        function onload() {
+            try {
+                Terminal.init();
+
+                setup();
+                startLoop();
+            } catch (error) {
+                alert(error.stack);
+            }
+        }
+
+        function setup() {
+            canvas.width = canvas.clientWidth * resolutionScale;
+            canvas.height = canvas.clientHeight * resolutionScale;
+
+            perlin = new Perlin(globalSeed);
+
+            let frequency = 1; 
+            let roughness = 3; 
+            let amplitude = 1;
+            let persistence = 0.25;
+            let cellSize = 25;
+            let octaves = 1;
+            let contrast = 1;
+
+            perlin.settings(frequency, roughness, amplitude, persistence, cellSize, octaves, contrast);
+        }
+
+        function startLoop() {
+            loop = setInterval(function() {
+                draw();
+                tick += dt;
+            }, tickRate);
+        }
+
+        function draw() {
+            let width = canvas.width;
+            let height = canvas.height;
+
+            let buffer = new Uint8ClampedArray(width * height * 4);
+
+            let benchmarker1 = new Benchmarker("Perlin");
+
+            let noiseBuffer = perlin.perlinBuffer3(canvas.width, canvas.height, tick);
+
+            for (let i = 0; i < width; i++) {
+                for (let j = 0; j < height; j++) {
+                    let perlinIndex = i + j * width;
+                    let colorIndex = perlinIndex * 4;
+
+                    let noiseVal = noiseBuffer[perlinIndex] / 2.0 + 0.5;
+                    let opacity = Math.floor(noiseVal * 255);
+                    
+                    buffer[colorIndex + 0] = 0;
+                    buffer[colorIndex + 1] = 0;
+                    buffer[colorIndex + 2] = 0;
+                    buffer[colorIndex + 3] = opacity;
+                }
+            }
+
+            Terminal.clear();
+            Terminal.print("Perlin: " + benchmarker1.fromInitialization().toFixed(2));
+
+            ctx.putImageData(new ImageData(buffer, width), 0, 0);
+        }
+    </script>
+</body>
+</html>

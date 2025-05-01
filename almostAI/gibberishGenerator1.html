@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body onload="onload()">
+    <input type="file" onchange="start(this.files[0])">
+    <input type="text-field" id="inp" placeholder="inp">
+    <button onclick="start(false)">Start</button>
+
+    <input type="text" id="inp2" placeholder="inp2">
+    <button onclick="next()">Next</button>
+    <p id="output"></p>
+    
+    <script src="../util/classPackage.js"></script>
+    <script src="../util/utilFunctions.js"></script>
+
+    <script>
+        let startString = "The quick brown fox jumps over the lazy dog."
+
+        let c = {}
+
+        let punctuation = ".!?"
+        let specialChars = ":;-"
+
+        let sampleRange = 3
+
+        let outputLength = 250
+
+        function onload() {
+            Terminal.init();
+            Terminal.setOpacity(1.0);
+            Terminal.setTextColor([255, 255, 255, 1]);
+            Terminal.clear();
+            Terminal.print("### VERSION 1 ###");
+            Terminal.newLine()
+            Terminal.print("Time shown in ms");
+        }
+
+        async function start(file) {
+            let benchmarker = new Benchmarker("Processing");
+
+            if (file) {
+                let text = await file.text();
+
+                startString = text.split(" ")
+                Terminal.print(`File "${await file.name}" loaded as source string.`);
+            } else {
+                startString = document.getElementById('inp').value.split(" ")
+            }
+
+            for (var x = 0; x < startString.length - 1; x++) {
+                let sel = startString[x]
+                let sel1 = startString[x+1]
+                if (!c[sel]) {
+                    c[sel] = {}
+                }
+                if (!c[sel][sel1]) {
+                    c[sel][sel1] = 1
+                } else if (c[sel][sel1]) {
+                    c[sel][sel1] += 1
+                }
+            }
+
+            Terminal.print("Total time to load: " + benchmarker.fromInitialization());
+
+            Terminal.print("Total Segments: " + Object.keys(c).length.toLocaleString());
+            Terminal.presetPrintLink("Connections", JSON.stringify(c));
+        }
+
+        function next() {
+            let benchmarker = new Benchmarker("Generation");
+
+            let keysLength = Object.keys(c).length
+            let curr = document.getElementById('inp2').value
+
+            let output = [curr]
+
+            if (!c[curr]) {
+                output.unshift(1)
+            }
+
+            let warning = false
+
+            while (true) {
+                if (output.length > keysLength) {
+                    break
+                }
+
+                let selSegment
+
+                if (c[curr]) {
+                    let keys = Object.keys(c[curr])
+
+                    let sample = []
+
+                    for (var x = 0; x < keys.length; x++) {
+                        let sK = keys[x]
+                        
+                        for (var y = 0; y < c[curr][sK]; y++) {
+                            sample.push(sK)
+                        }
+                    }
+
+                    let random = Math.floor(Math.random() * sample.length)
+
+                    selSegment = sample[random]
+                } else {
+                    let keys = Object.keys(c)
+                    selSegment = keys[Math.floor(Math.random()*keys.length)]
+                }
+
+                curr = selSegment
+
+                output.push(selSegment)
+
+                if (output.length >= outputLength) {
+                    warning = true
+                }
+
+                if (punctuation.includes(curr[curr.length - 1])) {
+                    if (warning || Math.floor(Math.random()*100) == 0) {
+                        break
+                    } 
+                }
+            }
+            
+            output = output.join(" ");
+
+            let fromInitialization = benchmarker.fromIntiialization();
+
+            Terminal.print("Average time per segment: " + (fromInitialization / outputLength));
+            Terminal.print("Total time to generate: " + fromInitialization);
+            Terminal.print("Total Segments: " + outputLength);
+
+            if (outputLength < 10000) {
+                document.getElementById('output').textContent = output;
+            } else {
+                Terminal.presetPrintLink("Output txt", output);
+            }
+
+            Terminal.presetPrintLink("~~download output~~", output, "src");
+            Terminal.newLine();
+            Terminal.generateSaveLink();
+        }
+    </script>
+</body>
+</html>

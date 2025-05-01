@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body onload="onload()">
+    <input type="text" id="startingSegment" placeholder="startingSegment" onchange="setStartingSegment(this.value)">
+    <input type="file" onchange="loadFile(this.files[0])">
+
+    <button onclick="process()">Process</button>
+    <button onclick="generate()">Generate</button>
+
+    <p id="output"></p>
+
+    <script src="../util/classPackage.js"></script>
+    <script src="../util/utilFunctions.js"></script>
+
+    <script>
+        let outputLength = 250;
+        let connections = {};
+        let usedSegments = [];
+        let usedSegmentsLength = 0;
+
+        let inputText = "THE The sun dipped below the horizon, casting an orange glow across the sky. As the evening breeze picked up, the scent of pine trees mixed with the faint hum of distant waves crashing against the shore. The world seemed to slow down, as if the day itself were taking a deep breath before surrendering to the calm of the night. Birds called to each other in the distance, their silhouettes darting between the trees, while the air grew cooler, hinting at the night to come. It was the perfect moment for reflection, where time stood still, and everything felt connected in the quiet beauty of nature.";
+        let startingSegment = "The";
+
+        let splitDelimiter = " ";
+        let toRemove = /["']/;
+        let joinDelimiter = " ";
+
+        function split(string) {
+            string = string.replace(toRemove, '');
+            return string.split(splitDelimiter);
+        }
+
+        function join(string) {
+            return string.join(joinDelimiter);
+        }
+
+        function setInputText(text) {
+            inputText = removeNewLines(text);
+        }
+
+        function setStartingSegment(segment) {
+            startingSegment = segment;
+        }
+
+        async function loadFile(file) {
+            setInputText(await file.text());
+            Terminal.print(`File "${await file.name}" loaded as source string.`);
+        }
+
+        function onload() {
+            Terminal.init();
+            Terminal.setOpacity(0.0);
+            Terminal.setTextColor([0, 0, 0, 1]);
+            Terminal.clear();
+            Terminal.print("### VERSION 3 ###");
+            Terminal.newLine()
+            Terminal.print("Time shown in ms");
+        }
+
+        function process() {
+            let processingBenchmarker = new Benchmarker("Processing");
+
+            let broken = split(inputText).filter((segment) => isBasicCharacter(segment) && isNotCaps(segment) && isNotNumber(segment));
+            let brokenLength = broken.length;
+
+            let currentSegment = broken[0];
+
+            for (let i = 1; i < brokenLength; i++) {
+                let nextSegment = broken[i];
+
+                let arr = connections[currentSegment];
+
+                if (!arr) {
+                    connections[currentSegment] = [nextSegment];
+                } else {
+                    arr.push(nextSegment);
+                }
+                
+                currentSegment = nextSegment;
+            }
+
+            usedSegments = Object.keys(connections);
+            usedSegmentsLength = usedSegments.length;
+            
+            Terminal.print("Total time to load: " + processingBenchmarker.fromInitialization());
+
+            Terminal.print("Total Segments: " + usedSegmentsLength.toLocaleString());
+            Terminal.presetPrintLink("Connections", JSON.stringify(connections));
+        }
+
+        function generate() {
+            let generated = generateString(startingSegment, outputLength);
+
+            if (outputLength < 10000) {
+                document.getElementById('output').textContent = generated;
+            } else {
+                Terminal.presetPrintLink("Output txt", generated);
+            }
+
+            Terminal.presetPrintLink("~~download output~~", generated, "src");
+            Terminal.newLine();
+            Terminal.generateSaveLink();
+        }
+
+        function generateString(startingSegment, length = 100) {
+            let generationBenchmarker = new Benchmarker("Generation");
+
+            let segments = [];
+
+            let nextSegment = connections[startingSegment] ? startingSegment : randomSegment();
+
+            for (let i = 0; i < length; i++) {
+                segments[i] = nextSegment;
+
+                let possible = connections[nextSegment];
+
+                if (possible) {
+                    nextSegment = possible[fRandom(possible.length)];
+                } else {
+                    nextSegment = randomSegment();
+                }
+            }
+
+            let joined = join(segments);
+
+            let fromInitialization = generationBenchmarker.fromInitialization();
+
+            Terminal.print("Average time per segment: " + (fromInitialization / length));
+            Terminal.print("Total time to generate: " + fromInitialization);
+            Terminal.print("Total Segments: " + length);
+
+            return joined;
+        }
+
+        function randomSegment() {
+            return usedSegments[fRandom(usedSegmentsLength)];
+        }
+    </script>
+</body>
+</html>

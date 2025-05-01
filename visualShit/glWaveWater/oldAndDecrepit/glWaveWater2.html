@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: none;
+            overflow-y: hidden;
+            background-color: black;
+        }
+    </style>
+</head>
+<body onload="onload()">
+    <canvas id="glcanvas" style="width: 100vw; height: 100vh;"></canvas>
+
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
+      integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
+      crossorigin="anonymous"
+      defer
+    ></script>
+    <script src="../../../util/classPackage.js"></script>
+    <script src="../../../util/utilFunctions.js"></script>
+    <script src="./glFunctions.js"></script>
+    <script src="./sunCalculator.js"></script>
+
+    <script>
+        let canvas = document.getElementById('glcanvas');;
+        let gl;
+
+        let loop;
+        let tickRate = 16;
+        let dt = 1;
+
+        let numWaves = 10.0;
+        let precision = "lowp";
+
+        let skyDepth = 1000;
+
+        let gridQuads = 150;
+        let gridWidth = 100;
+        let gridHeight = 100;
+        let gridDepth = 100;
+        let offsetX = 0;
+        let offsetY = 0;
+        let offsetZ = gridDepth / -2;
+
+        let sphereRadius = skyDepth / 2;
+        let sphereFaces = 625;
+
+        let cubeWidth = 500;
+        let cubeHeight = 500;
+        let cubeDepth = 500;
+
+        let directions = [];
+
+        let wavePositions = [];
+        let waveColors = [];
+
+        let skyPositions = [];
+        let skyColors = [];
+
+        let data = {
+            resetTime: 100000,
+            startDate: Date.now(),
+            
+
+            skyDepth: skyDepth,
+
+            w: 0.1,
+            A: 0.5,
+            t: 0,
+            s: 0.05,
+            wCoeff: 1.16,
+            ACoeff: 0.84,
+
+            ambient: 0.9,
+
+            doSun: 1.0,
+            sunDistance: skyDepth,
+            sunRotationRadius: 50,
+            sunBodyRadius: 20,
+            sunBodyContrast: 1000.0,
+            sunBodyExponent: 1,
+            sunAtmosphereRadius: 1,
+            sunAtmosphereContrast: 1,
+            sunAtmosphereExponent: 1,
+            sunDiffuseContrast: 3,
+            sunDiffuseExponent: 0.2,
+            sunSpecularContrast: 1,
+            sunSpecularExponent: 5,
+            sunIntensity: 1,
+
+            doMoon: 1.0,
+            moonDistance: skyDepth,
+            moonRotationRadius: 50,
+            moonBodyRadius: 5,
+            moonBodyContrast: 1000.0,
+            moonBodyExponent: 1,
+            moonAtmosphereRadius: 0,
+            moonAtmosphereContrast: 1,
+            moonAtmosphereExponent: 1,
+            moonDiffuseContrast: 0.1,
+            moonDiffuseExponent: 0.2,
+            moonSpecularContrast: 1,
+            moonSpecularExponent: 5,
+            moonIntensity: 0.2,
+
+            doClouds: 1.0,
+            cloudContrast: 2,
+            cloudExponent: 1,
+            cloudSpeed: 0.0001,
+            cloudBias: 0.15,
+        };
+
+        let data3fv = {
+            resolution: new Vector3(canvas.clientWidth, canvas.clientHeight, skyDepth),
+            sunPositionOriginal: new Vector3(0.0, 0, data.sunDistance),
+            sunPosition: new Vector3(0.0, 0.0, 0.0),
+            sunRotations: new Vector3(Math.PI, 0.0, 0.0),
+            sunRotationSpeed: new Vector3(0.001, 0.0, 0.0),
+            moonPositionOriginal: new Vector3(0.0, 0.0, data.moonDistance),
+            moonPosition: new Vector3(Math.PI, 0.0, 0.0),
+            moonRotations: new Vector3(0.0, 0.0, 0.0),
+            moonRotationSpeed: new Vector3(0.001, 0.0, 0.0),
+        } 
+
+        let data4fv = {
+            sunColor: new Vector4(0.91, 0.91, 0.6, 1.0),
+            moonColor: new Vector4(1.0, 1.0, 1.0, 1.0),
+            cloudColor: new Vector4(1.0, 1.0, 1.0, 1.0),
+            skyBright: new Vector4(0.0, 0.25, 1.0, 1.0),
+            skyMedium: new Vector4(0.73, 0.56, 0.4, 1.0),
+            skyDark: new Vector4(0.0, 0.0, 0.0, 1.0),
+            waveColor: new Vector4(0.0, 0.16, 0.32, 1.0),
+            skyColor: new Vector4(0.44, 0.8, 0.92, 1.0),
+        };
+
+        const waveVertexShader = `
+            precision ${precision} float;
+
+            attribute vec4 aVertexPosition;
+            
+            struct Wave {
+                vec4 position;
+                vec3 tangent;
+                vec3 binormal;
+            };
+
+            const int numWaves = ${numWaves};
+
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+
+            uniform vec4 waveColor;
+
+            uniform float w;
+            uniform float A;
+            uniform float t;
+            uniform float s;
+            uniform float wCoeff;
+            uniform float ACoeff;
+
+            uniform vec3 sunPosition;
+
+            uniform float directions[numWaves];
+
+            varying vec4 vColor;
+            varying vec3 vPosition;
+            varying vec3 vNormal;
+
+            Wave calculateFBM(vec4 position, float[numWaves] directions, float w, float wCoeff, float A, float aCoeff, float t, float s) {
+                vec2 posVec = vec2(position.xz);
+                
+                float timeSpeed = t * s;
+                float w1 = w;
+                float A1 = A;
+
+                float waveVal = 0.0;
+                float dX = 0.0;
+                float dZ = 0.0;
+
+                for (int i = 0; i < numWaves; i++) {
+                    float direction = directions[i];
+                    vec2 dirVec = vec2(cos(direction), sin(direction));
+
+                    float posDirDot = dot(posVec, dirVec);
+                    float comp = posDirDot * w1 + timeSpeed;
+
+                    float sinVal = sin(comp);
+                    float cosVal = cos(comp);
+
+                    waveVal += A1 * exp(sinVal - 1.0);
+
+                    dX += w1 * dirVec.x * A1 * exp(sinVal - 2.0) * cosVal;
+                    dZ += w1 * dirVec.y * A1 * exp(sinVal - 2.0) * cosVal;
+
+                    w1 *= wCoeff;
+                    A1 *= aCoeff;
+                }
+
+                vec4 newPosition = position.xyzw;
+                newPosition.y += waveVal;
+
+                vec3 tangent = vec3(1.0, dX, 0.0);
+                vec3 binormal = vec3(0.0, dZ, 1.0);
+
+                return Wave(newPosition, tangent, binormal);
+            }
+
+            void main(void) {
+                Wave waveStruct = calculateFBM(aVertexPosition, directions, w, wCoeff, A, ACoeff, t, s);
+                
+                vec3 normal = cross(waveStruct.tangent, waveStruct.binormal);
+
+                vColor = waveColor;
+                vPosition = waveStruct.position.xyz;
+                vNormal = normal;
+                
+                gl_Position = uProjectionMatrix * uModelViewMatrix * waveStruct.position;
+            }
+        `;
+
+        const waveFragmentShader = `
+            precision ${precision} float;
+
+            struct Light {
+                vec3 position;
+                vec4 color;
+                float diffuseContrast;
+                float diffuseExponent;
+                float specularContrast;
+                float specularExponent;
+            };
+
+            varying vec4 vColor;
+            varying vec3 vPosition;
+            varying vec3 vNormal;
+
+            uniform vec3 sunPosition;
+            uniform vec4 sunColor;
+            uniform float sunDiffuseContrast;
+            uniform float sunDiffuseExponent;
+            uniform float sunSpecularContrast;
+            uniform float sunSpecularExponent;
+            uniform float doSun;
+
+            uniform vec3 moonPosition;
+            uniform vec4 moonColor;
+            uniform float moonDiffuseContrast;
+            uniform float moonDiffuseExponent;
+            uniform float moonSpecularContrast;
+            uniform float moonSpecularExponent;
+            uniform float doMoon;
+
+            uniform float ambient;
+
+            float clampLight(float val) {
+                return clamp(val, 0.0, 1.0);
+            }
+
+            vec4 getColorFromLight(vec3 position, vec3 normal, vec4 color, Light light) {
+                vec3 lightPosition = light.position;
+                vec4 lightColor = light.color;
+
+                lightPosition.y *= -1.0;
+                
+                vec3 eyeVector = normalize(position * -1.0);
+                vec3 lightVector = normalize(lightPosition - position);
+                vec3 halfVector = normalize(eyeVector + lightVector);
+                vec3 reflectionVector = normalize(2.0 * dot(normal, lightVector) * normal - lightVector);
+
+                float diffuseCos = dot(normal, lightVector);
+                float diffuse = pow(clampLight(diffuseCos), light.diffuseExponent) * light.diffuseContrast;
+
+                float specularCos = dot(eyeVector, reflectionVector);
+                float specular = pow(clampLight(specularCos), light.specularExponent) * light.specularContrast;
+
+                vec4 diffuseColor = color * diffuse * light.color;
+                vec4 specularColor = vec4(0.0);
+
+                if (specular > 0.0) {
+                    specularColor = lightColor * specular;
+                    diffuseColor = diffuseColor * (1.0 - specular);
+                }
+
+                return diffuseColor + specularColor;
+            }
+
+            void main(void) {
+                vec3 vNormal1 = normalize(vNormal);
+
+                Light sun = Light(sunPosition, sunColor, sunDiffuseContrast, sunDiffuseExponent, sunSpecularContrast, sunSpecularExponent);
+                Light moon = Light(moonPosition, moonColor, moonDiffuseContrast, moonDiffuseExponent, moonSpecularContrast, moonSpecularExponent);
+
+                vec4 ambientColor = vColor * ambient;
+                vec4 colorFromSun = vec4(0.0);
+                vec4 colorFromMoon = vec4(0.0);
+
+                if (doSun == 1.0) {
+                    colorFromSun = getColorFromLight(vPosition, vNormal1, vColor, sun);
+                }
+
+                if (doMoon == 1.0) {
+                    colorFromMoon = getColorFromLight(vPosition, vNormal1, vColor, moon);
+                }
+
+                gl_FragColor = ambientColor + colorFromSun + colorFromMoon;
+            }
+        `;
+
+        const skyVertexShader = `
+            precision ${precision} float;
+
+            attribute vec4 aVertexPosition;
+
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+
+            varying vec3 vPosition;
+            varying vec3 vDirection;
+
+            void main(void) {
+                vPosition = aVertexPosition.xyz;
+                vDirection = normalize(aVertexPosition.xyz);
+                gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+            }
+        `;
+
+        const skyFragmentShader = `
+            precision ${precision} float;
+
+            struct Light {
+                vec3 position;
+                vec3 direction;
+                vec4 color;
+                float distance;
+                float bodyRadius;
+                float bodyContrast;
+                float bodyExponent;
+                float atmosphereRadius;
+                float atmosphereContrast;
+                float atmosphereExponent;
+                float intensity;
+            };
+
+            varying vec3 vPosition;
+            varying vec3 vDirection;
+
+
+            uniform vec4 cloudColor;
+            uniform vec4 skyBright;
+            uniform vec4 skyMedium;
+            uniform vec4 skyDark;
+
+            uniform vec3 resolution;
+
+            uniform float t;
+            uniform float skyDepth;
+
+            uniform vec4 sunColor;
+            uniform vec3 sunPosition;
+            uniform float doSun;
+            uniform float sunDistance;
+            uniform float sunRotationRadius;
+            uniform float sunBodyRadius;
+            uniform float sunBodyContrast;
+            uniform float sunBodyExponent;
+            uniform float sunAtmosphereRadius;
+            uniform float sunAtmosphereContrast;
+            uniform float sunAtmosphereExponent;
+            uniform float sunIntensity;
+
+            uniform vec4 moonColor;
+            uniform vec3 moonPosition;
+            uniform float doMoon;
+            uniform float moonDistance;
+            uniform float moonRotationRadius;
+            uniform float moonBodyRadius;
+            uniform float moonBodyContrast;
+            uniform float moonBodyExponent;
+            uniform float moonAtmosphereRadius;
+            uniform float moonAtmosphereContrast;
+            uniform float moonAtmosphereExponent;
+            uniform float moonIntensity;
+
+            uniform float doClouds;
+            uniform float cloudContrast;
+            uniform float cloudExponent;
+            uniform float cloudBias;
+            uniform float cloudSpeed;
+
+            float noise(vec2 pq) {
+                highp float a = 12.9898;
+                highp float b = 78.233;
+                highp float c = 43758.5453;
+                highp float dt = dot(pq.xy, vec2(a, b));
+                highp float sn = mod(dt,3.14);
+                return fract(sin(sn) * c);
+            }
+
+            float noiseSmooth(vec2 pq) {
+                vec2 index = floor(pq);
+                vec2 interpVec = smoothstep(0.0, 1.0, fract(pq));
+
+                float tL = noise(index + vec2(0.0, 0.0));
+                float tR = noise(index + vec2(1.0, 0.0));
+                float top = mix(tL, tR, interpVec.x);
+
+                float bL = noise(index + vec2(0.0, 1.0));
+                float bR = noise(index + vec2(1.0, 1.0));
+                float bottom = mix(bL, bR, interpVec.x);
+
+                return mix(top, bottom, interpVec.y);
+            }
+
+            float layeredNoiseSmooth(vec2 pq, float initialMultiplier, float initialPower) {
+                float value = 0.0;
+
+                float amplitude = 1.0;
+                float frequency = 10.0;
+
+                float amplitudeCoeff = 0.5;
+                float frequencyCoeff = 2.0;
+
+                for (float i = 0.0; i < 5.0; i++) {
+                    value += noiseSmooth(pq * frequency) * amplitude;
+                    amplitude *= amplitudeCoeff;
+                    frequency *= frequencyCoeff;
+                }
+
+                return value;
+            }
+
+            float getCloudColor(vec3 position, vec3 resolution, float directionDot, float time, float cloudSpeed, float cloudContrast, float cloudExponent, float cloudBias) {
+                vec2 uv = position.xy / resolution.xy;
+                uv.x *= resolution.x / resolution.y;
+                uv.x += time * cloudSpeed;
+                
+                float cloud = layeredNoiseSmooth(uv, 2.0, 2.0);
+                float cloudVal = max(0.0, pow(cloud, cloudExponent) * cloudContrast * (directionDot - cloudBias));
+
+                return cloudVal;
+            }
+
+            vec4 getColorFromLight(vec3 direction, vec3 position, vec4 skyDark, vec4 skyMedium, vec4 skyBright, float directionDot, float cloudVal, vec4 cloudColor, Light light) {
+                vec3 distanceVec = direction * light.distance - light.position;
+                float distance = length(distanceVec);
+
+                float horizonTheta = dot(direction, vec3(0.0, 1.0, 0.0));
+                float lightTheta = dot(light.direction, vec3(0.0, 1.0, 0.0));
+                float totalTheta = horizonTheta - lightTheta;
+
+                vec4 skyColor = mix(skyBright, skyDark, max(0.0, totalTheta));
+                
+                vec4 bodyColor = vec4(0.0);
+                vec4 atmosphereColor = vec4(0.0);
+
+                if (distance <= light.bodyRadius) {
+                    float body =  1.0 - distance / light.bodyRadius;
+                    float bodyIntensity = pow(body, light.bodyExponent) * light.bodyContrast;
+
+                    bodyColor = light.color * bodyIntensity;
+                }
+
+                if (distance <= light.atmosphereRadius) {
+                    float atmosphere = 1.0 - distance / light.atmosphereRadius;
+                    float atmosphereIntensity = pow(atmosphere, light.atmosphereExponent) * light.atmosphereContrast;
+
+                    atmosphereColor = light.color * atmosphereIntensity;
+                }
+
+                if (cloudVal > 0.0) {
+                    skyColor = mix(skyColor, cloudColor, cloudVal);
+                }
+
+                skyColor *= light.intensity;
+
+                return skyColor + bodyColor + atmosphereColor;
+            }
+
+            void main(void) {
+                vec3 direction = normalize(vDirection);
+                float directionDot = dot(direction, vec3(0.0, 1.0, 0.0));
+
+                Light sun = Light(sunPosition, normalize(sunPosition), sunColor, sunDistance, sunBodyRadius, sunBodyContrast, sunBodyExponent, sunAtmosphereRadius, sunAtmosphereContrast, sunAtmosphereExponent, sunIntensity);
+                Light moon = Light(moonPosition, normalize(moonPosition), moonColor, moonDistance, moonBodyRadius, moonBodyContrast, moonBodyExponent, moonAtmosphereRadius, moonAtmosphereContrast, moonAtmosphereExponent, moonIntensity);
+                
+                float cloudVal = 0.0;
+
+                if (doClouds == 1.0) {
+                    cloudVal = getCloudColor(vPosition, resolution, directionDot, t, cloudSpeed, cloudContrast, cloudExponent, cloudBias);
+                }
+
+                vec4 colorFromSun = vec4(0.0);
+                vec4 colorFromMoon = vec4(0.0);
+                
+                if (doSun == 1.0) {
+                    colorFromSun = getColorFromLight(direction, vPosition, skyDark, skyMedium, skyBright, directionDot, cloudVal, cloudColor, sun);
+                }
+
+                if (doMoon == 1.0) {
+                    colorFromMoon = getColorFromLight(direction, vPosition, skyDark, skyMedium, skyBright, directionDot, cloudVal, cloudColor, moon);
+                }
+ 
+                gl_FragColor = colorFromSun + colorFromMoon;
+            }
+        `;
+
+        function onload() {
+            try {
+                setup();
+                startLoop();
+            } catch (error) {
+                alert(error.stack);
+            }
+        }
+
+        function setup() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+
+            gl = canvas.getContext('webgl');
+
+            if (gl === null) {
+                throw new Error("Unable to initialize WebGL. Your browser or machine may not support it.");
+                return;
+            }
+
+            for (let i = 0; i < numWaves; i++) {
+                directions.push(Math.random() * Math.PI * 2); 
+            }
+
+            let waveMesh = createRectangleMeshY(gridQuads, gridWidth, gridDepth, offsetX, offsetY, offsetZ);
+            //let skyMesh = createCubeMesh(cubeWidth, cubeHeight, cubeDepth, 0, 0, 0);
+            let skyMesh = createSphereMesh(sphereFaces, sphereRadius, 0, 0, 0);
+
+            for (let i = 0; i < waveMesh.length; i += 3) {
+                wavePositions.push(waveMesh[i], waveMesh[i + 1], waveMesh[i + 2]);
+                waveColors.push();
+            }
+
+            for (let i = 0; i < skyMesh.length; i += 3) {
+                skyPositions.push(skyMesh[i], skyMesh[i + 1], skyMesh[i + 2]);
+                skyColors.push();
+            }
+
+            data.waveCount = waveMesh.length / 3;
+            data.skyCount = skyMesh.length / 3;
+        }
+
+        function startLoop() {
+            loop = setInterval(function() {
+                try {
+                    update(dt);
+
+                    draw(gl);
+
+                    data.t += dt;
+                } catch (error) {
+                    alert(error.stack);
+                }
+            }, tickRate);
+        }
+
+        function update(dt) {
+            data3fv.sunRotations = data3fv.sunRotations.sum(data3fv.sunRotationSpeed.scaled(dt)).mod(Math.PI * 2);
+            data3fv.moonRotations = data3fv.moonRotations.sum(data3fv.moonRotationSpeed.scaled(dt)).mod(Math.PI * 2);
+
+            data3fv.sunPosition = data3fv.sunPositionOriginal.rotateRad(data3fv.sunRotations, Vector3.neutral());
+            data3fv.moonPosition = data3fv.moonPositionOriginal.rotateRad(data3fv.moonRotations, Vector3.neutral());
+
+            data.t += dt;
+            data.t %= data.resetTime;
+        }
+
+        function draw(gl) {
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); 
+            gl.clearDepth(1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const fieldOfViewWave = Math.PI / 4;
+            const fieldOfViewSky = Math.PI / 4;
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+
+            const zNearWave = 0.1;
+            const zFarWave = gridDepth;
+
+            const zNearSky = 0.1;
+            const zFarSky = skyDepth;
+
+            const projectionMatrixWave = mat4.create();
+            const projectionMatrixSky = mat4.create();
+
+            mat4.perspective(projectionMatrixWave, fieldOfViewWave, aspect, zNearWave, zFarWave);
+            mat4.perspective(projectionMatrixSky, fieldOfViewSky, aspect, zNearSky, zFarSky);
+
+            const modelViewMatrixWave = mat4.create();
+            const modelViewMatrixSky = mat4.create();
+            
+            mat4.translate(modelViewMatrixWave, modelViewMatrixWave,[0.0, -10.0, 0.0]);
+            mat4.rotate(modelViewMatrixWave, modelViewMatrixWave, 0.0, [1.0, 0, 0]);
+
+            mat4.translate(modelViewMatrixSky, modelViewMatrixSky,[0.0, 0.0, 0.0]);
+            mat4.rotate(modelViewMatrixSky, modelViewMatrixSky, 0.0, [0.0, 0, 1.0]);
+
+            const waveBuffers = initBuffers(gl, wavePositions, waveColors);
+            const waveProgram = constructFullShaderProgram(gl, waveVertexShader, waveFragmentShader);
+            finaliseProgram(waveProgram, waveBuffers, projectionMatrixWave, modelViewMatrixWave);
+            gl.drawArrays(gl.TRIANGLES, 0, waveBuffers.vertexCount);
+
+
+            const skyBuffers = initBuffers(gl, skyPositions, skyColors);
+            const skyProgram = constructFullShaderProgram(gl, skyVertexShader, skyFragmentShader);
+            finaliseProgram(skyProgram, skyBuffers, projectionMatrixSky, modelViewMatrixSky)
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, skyBuffers.vertexCount);
+
+            deleteShaderProgram(gl, waveProgram);
+            deleteShaderProgram(gl, skyProgram);
+            deleteBuffers(gl, waveBuffers);
+            deleteBuffers(gl, skyBuffers);
+        }
+
+        function setUniforms(gl, programInfo, shaderProgram, projectionMatrix, modelViewMatrix) {
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+
+            let directionsLoc = gl.getUniformLocation(shaderProgram, 'directions');
+            gl.uniform1fv(directionsLoc, directions);
+
+            Object.keys(data).forEach((key) => {
+                const uniformLocation = gl.getUniformLocation(shaderProgram, key);
+                gl.uniform1f(uniformLocation, data[key]);
+            });
+
+            Object.keys(data3fv).forEach((key) => {
+                const uniformLocation = gl.getUniformLocation(shaderProgram, key);
+                gl.uniform3fv(uniformLocation, data3fv[key].array());
+            });
+
+            Object.keys(data4fv).forEach((key) => {
+                const uniformLocation = gl.getUniformLocation(shaderProgram, key);
+                gl.uniform4fv(uniformLocation, data4fv[key].array());
+            });
+        }
+
+        document.body.addEventListener('mousedown', (e) => {dt *= 10 * (e.ctrlKey ? -1 : 1)});
+        document.body.addEventListener('mouseup', (e) => {dt /= 10 * (dt < 0 ? -1 : 1)});
+    </script>
+</body>
+</html>

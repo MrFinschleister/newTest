@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <input type="text" id="inp">
+    <button onclick=start()>Start</button>
+    <input type="text" id="inp2">
+    <button onclick="next()">Next</button>
+    <p id="output"></p>
+    <script>
+        let inp = "Kuds"
+
+        let c = {}
+
+        let ideas = {
+            "Kuds": [
+                ["don't", "like", "elves"],
+                ["are", "gay", "like", "France"],
+            ]
+        }
+
+        function start() {
+            let startString = document.getElementById('inp').value.split(" ")
+
+            for (var x = 0; x < startString.length - 1; x++) {
+                let sel = str[x]
+                let sel1 = str[x+1]
+                if (!c[sel]) {
+                    c[sel] = {}
+                }
+                if (!c[sel][sel1]) {
+                    c[sel][sel1] = 1
+                } else if (c[sel][sel1]) {
+                    c[sel][sel1] += 1
+                }
+            }
+            document.getElementById('output').innerHTML = JSON.stringify(c)
+        }
+
+        function next() {
+            let curr = document.getElementById('inp2').value
+
+            let output = [curr]
+
+            let selSpread = ideas[curr]
+
+            let selI = selSpread[Math.floor(Math.random()*selSpread.length)]
+            
+            for (var x = 0; x < selI.length; x++) {
+                output.push(selI[x])
+            }
+
+            document.getElementById('output').innerHTML = output.join(" ")
+        }
+    </script>
+</body>
+</html>

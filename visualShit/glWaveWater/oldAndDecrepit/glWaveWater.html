@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: none;
+            overflow-y: hidden;
+            background-color: black;
+        }
+    </style>
+</head>
+<body onload="onload()">
+    <canvas id="glcanvas" style="width: 100vw; height: 100vh;"></canvas>
+
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"
+      integrity="sha512-zhHQR0/H5SEBL3Wn6yYSaTTZej12z0hVZKOv3TwCUXT1z5qeqGcXJLLrbERYRScEDDpYIJhPC1fk31gqR783iQ=="
+      crossorigin="anonymous"
+      defer
+    ></script>
+    <script src="../../../util/classPackage.js"></script>
+    <script src="../../../util/utilFunctions.js"></script>
+    <script src="./glFunctions.js"></script>
+
+    <script>
+        let canvas;
+        let gl;
+
+        let loop;
+        let tickRate = 16;
+        let tickDt = 0.1;
+        let rotDt = 0.0001;
+
+        let waveIterations = 10.0;
+
+        let cubeWidth = 500;
+        let cubeHeight = 500;
+        let cubeDepth = 500;
+
+        let sunDist = cubeHeight;
+        let sunPos = [0.0, 0.0, -cubeDepth];
+        let horizonPos = [0.0, 0.0, -cubeDepth];
+        let sunColor = [0.95, 0.91, 0.6, 1.0];
+        let skyBright = [0.0, 0.25, 1.0, 1.0];
+        let skyDark = [0.1, 0.0, 0.2, 1.0];
+        let directions = [];
+
+        let wavePositions = [];
+        let waveColors = [];
+        let waveTypes = [];
+
+        let cubePositions = [];
+        let cubeColors = [];
+        let cubeTypes = [];
+
+        let positionsMesh = [];
+        let colors = [];
+        let types = [];
+
+        let data = {
+            wavelength: 2,
+            frequency: 1,
+            amplitude: 0.5,
+            speed: 0.5,
+            direction: 1,
+            time: 0,
+
+            amplitudeCoeff: 0.5,
+            frequencyCoeff: 1.35,
+
+            contrast: 0.75,
+            contrastPow: 0.3,
+            specularContrast: 0.5,
+            specular: 1.25,
+            ambient: 0.0,
+
+            sunExp: 250.0,
+            sunThresh: 0.03,
+            sunIntensity: 1.0,
+            sunTheta: Math.PI / 2,
+            sunsetBias: 1.5,
+        };
+
+        const waveVertexShader = `
+            precision highp float;
+
+            attribute vec4 aVertexPosition;
+            attribute vec4 aVertexColor;
+            attribute float vertexType;
+
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+
+            uniform float wavelength;
+            uniform float frequency;
+            uniform float amplitude;
+            uniform float speed;
+            uniform float direction;
+            uniform float directions[${waveIterations}];
+            uniform float time;
+
+            uniform float amplitudeCoeff;
+            uniform float frequencyCoeff;
+
+            varying highp vec4 vColor;
+            varying highp vec4 originalPosition;
+            varying highp vec3 normal;
+
+            void main(void) {
+                vec4 position = vec4(aVertexPosition.xyzw);
+                originalPosition = position;
+                
+                vec2 positionVec = vec2(position.xy);
+                float x = positionVec.x;
+                float y = positionVec.y;
+
+                const int iterations = ${waveIterations};
+
+                float timeSpeed = time * speed;
+
+                float val = 0.0;
+                float partialDX = 0.0;
+                float partialDY = 0.0;
+
+                float dXPrev = 0.0;
+                float dYPrev = 0.0;
+                float timeSpeedPrev = timeSpeed - speed;
+
+                float currAmplitude = amplitude;
+                float currFrequency = frequency;
+
+                for (int i = 0; i < iterations; i++) {
+                    float currDirection = directions[i];
+                    vec2 currDirectionVec = vec2(-1.0 * cos(currDirection), sin(currDirection));
+                    float dotProd = dot(currDirectionVec, positionVec);
+
+                    float comp = dotProd * currFrequency + timeSpeedPrev;
+
+                    float sinVal = sin(comp);
+                    float cosVal = cos(comp);
+
+                    x += currDirectionVec.x * currFrequency * currAmplitude * exp(sinVal - 1.0) * cosVal;
+                    y += currDirectionVec.y * currFrequency * currAmplitude * exp(sinVal - 1.0) * cosVal;
+
+                    currAmplitude *= amplitudeCoeff;
+                    currFrequency *= frequencyCoeff;
+                }
+
+                positionVec = vec2(x, y);
+
+                currAmplitude = amplitude;
+                currFrequency = frequency;
+
+                for (int i = 0; i < iterations; i++) {
+                    float currDirection = directions[i];
+                    vec2 currDirectionVec = vec2(-1.0 * cos(currDirection), sin(currDirection));
+                    float dotProd = dot(currDirectionVec, positionVec);
+
+                    float comp = dotProd * currFrequency + timeSpeed;
+                
+                    float sinVal = sin(comp);
+                    float cosVal = cos(comp);
+
+                    val += currAmplitude * exp(sinVal - 1.0);
+
+                    partialDX += currDirectionVec.x * currFrequency * currAmplitude * exp(sinVal - 1.0) * cosVal;
+                    partialDY += currDirectionVec.y * currFrequency * currAmplitude * exp(sinVal - 1.0) * cosVal;
+
+                    currAmplitude *= amplitudeCoeff;
+                    currFrequency *= frequencyCoeff;
+                }
+
+                position.z += val;
+
+                vec3 tangent = vec3(0.0, 1.0, partialDX);
+                vec3 bitangent = vec3(1.0, 0.0, partialDY);
+
+                normal = normalize(cross(tangent, bitangent));
+
+                gl_Position = uProjectionMatrix * uModelViewMatrix * position;
+                vColor = aVertexColor;
+            }
+        `;
+
+        const waveFragmentShader = `
+            precision highp float;
+
+            uniform float contrast;
+            uniform float contrastPow;
+            uniform float specular;
+            uniform float specularContrast;
+            uniform float ambient;
+            
+            uniform vec3 sunPos;
+            uniform vec4 sunColor;
+            uniform vec4 skyBright;
+            uniform vec4 skyDark;
+
+            varying highp vec4 vColor;
+            varying highp vec4 originalPosition;
+            varying highp vec3 normal;
+
+            void main(void) {
+                vec3 originalPos = vec3(originalPosition.xyz);
+
+                vec3 viewVec = normalize(vec3(0.0, 0.0, 0.0) - originalPos);
+                vec3 sunVec = normalize(sunPos - originalPos);
+                vec3 halfway = normalize(viewVec + sunVec);
+
+                float diffuse = dot(normal, sunVec);
+                float specularHighlight = dot(halfway, normal);
+
+                if (diffuse < 0.0) {
+                    diffuse = 0.0;
+                }
+
+                float diffuseFinal = pow(1.0 + diffuse, contrastPow) * contrast;
+                float specularFinal = pow(specularHighlight, specular) * specularContrast;
+
+                float lighting = diffuseFinal + specularFinal + ambient;
+
+                gl_FragColor = vColor * lighting + specularFinal * sunColor;
+            }
+        `;
+
+        const cubeVertexShader = `
+            precision highp float;
+
+            attribute vec4 aVertexPosition;
+            attribute vec4 aVertexColor;
+            attribute float vertexType;
+
+            uniform mat4 uModelViewMatrix;
+            uniform mat4 uProjectionMatrix;
+
+            varying highp vec4 vColor;
+            varying highp vec4 originalPosition;
+
+            void main(void) {
+                vec4 color = aVertexColor;
+
+                gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
+
+                originalPosition = aVertexPosition;
+                vColor = color;
+            }
+        `;
+
+        const cubeFragmentShader = `
+            precision highp float;
+
+            varying highp vec4 vColor;
+            varying highp vec4 originalPosition;
+            
+            uniform vec3 sunPos;
+            uniform vec3 sunPosNormal;
+            uniform vec3 horizonPos;
+            uniform vec3 horizonPosNormal;
+
+            uniform vec4 sunColor;
+            uniform vec4 skyBright;
+            uniform vec4 skyDark;
+
+            uniform float sunExp;
+            uniform float sunThresh;
+            uniform float sunIntensity;
+            uniform float sunTheta;
+            uniform float sunsetBias;
+
+            void main(void) {
+                vec4 color = vColor;
+
+                float sunDot = dot(normalize(originalPosition.xyz), sunPosNormal);
+                float val = pow(sunDot, sunExp);
+
+                float thetaDiff = cos(sunTheta + 4.71) / 2.0;
+                color *= thetaDiff;
+
+                color += thetaDiff * skyBright;
+                color += (1.0 - thetaDiff) * skyDark;
+
+                color += sunColor * val * sunIntensity;
+ 
+                gl_FragColor = color;
+            }
+        `
+
+        function onload() {
+            try {
+                setup();
+                startLoop();
+            } catch (error) {
+                alert(error.stack);
+            }
+        }
+
+        function setup() {
+            canvas = document.getElementById('glcanvas');
+
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+
+            gl = canvas.getContext('webgl');
+
+            if (gl === null) {
+                throw new Error("Unable to initialize WebGL. Your browser or machine may not support it.");
+                return;
+            }
+
+            data.frequency /= data.wavelength;
+
+            sunPos[2] = cubeDepth / -2;
+
+            let quads = 100;
+            let gridWidth = 100;
+            let gridHeight = 100;
+            let offsetX = 0;
+            let offsetY = 25;
+            let offsetZ = -10;
+
+            for (let i = 0; i < waveIterations; i++) {
+                directions.push(Math.random() * Math.PI * 2); 
+            }
+
+            let waveMesh = createRectangleMeshZ(quads, gridWidth, gridHeight, offsetX, offsetY, offsetZ);
+            let cubeMesh = createCubeMesh(cubeWidth, cubeHeight, cubeDepth, 0, 0, 0);
+
+            for (let i = 0; i < waveMesh.length; i += 3) {
+                wavePositions.push(waveMesh[i], waveMesh[i + 1], waveMesh[i + 2]);
+                waveColors.push(0.0, 0.32, 0.46, 1.0);
+                waveTypes.push(0.0);
+            }
+
+            for (let i = 0; i < cubeMesh.length; i += 3) {
+                cubePositions.push(cubeMesh[i], cubeMesh[i + 1], cubeMesh[i + 2]);
+                cubeColors.push(0.44, 0.8, 0.92, 1.0);
+                cubeTypes.push(1.0);
+            }
+
+            data.waveCount = waveMesh.length / 3;
+            data.cubeCount = cubeMesh.length / 3;
+        }
+
+        function startLoop() {
+            loop = setInterval(function() {
+                data.sunTheta += rotDt;
+                data.sunTheta %= Math.PI * 2;
+
+                sunPos[0] = -Math.cos(data.sunTheta) * sunDist;
+                sunPos[1] = +Math.sin(data.sunTheta) * sunDist;
+
+                draw(gl);
+
+                data.time += tickDt;
+            }, tickRate);
+        }
+
+        function draw(gl) {
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); 
+            gl.clearDepth(1.0);
+            gl.enable(gl.DEPTH_TEST);
+            gl.depthFunc(gl.LEQUAL);
+
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const fieldOfViewWave = Math.PI / 4;
+            const fieldOfViewCube = Math.PI / 2;
+            const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
+
+            const zNearWave = 0.1;
+            const zFarWave = 100.0;
+
+            const zNearCube = 0.1;
+            const zFarCube = cubeDepth;
+
+            const projectionMatrixWave = mat4.create();
+            const projectionMatrixCube = mat4.create();
+
+            mat4.perspective(projectionMatrixWave, fieldOfViewWave, aspect, zNearWave, zFarWave);
+            mat4.perspective(projectionMatrixCube, fieldOfViewCube, aspect, zNearCube, zFarCube);
+
+            const modelViewMatrixWave = mat4.create();
+            const modelViewMatrixCube = mat4.create();
+            
+            let rotationWaveX = -1.56;
+            let rotationWaveY = 0;
+            let rotationWaveZ = 0;
+            mat4.translate(modelViewMatrixWave, modelViewMatrixWave,[-0.0, 0.0, 0.0]);
+            mat4.rotate(modelViewMatrixWave, modelViewMatrixWave, rotationWaveX, [1.0, 0, 0]);
+
+            let rotationCubeX = 0;
+            let rotationCubeY = 0;
+            let rotationCubeZ = 0;
+            mat4.translate(modelViewMatrixCube, modelViewMatrixCube,[-0.0, 0.0, -0.0]);
+            mat4.rotate(modelViewMatrixCube, modelViewMatrixCube, rotationCubeX, [1.0, 0, 0]);
+
+            const waveBuffers = initBuffers(gl, wavePositions, waveColors, waveTypes);
+            const waveProgram = constructFullShaderProgram(gl, waveVertexShader, waveFragmentShader);
+            finaliseProgram(waveProgram, waveBuffers, projectionMatrixWave, modelViewMatrixWave);
+            gl.drawArrays(gl.TRIANGLES, 0, waveBuffers.vertexCount);
+
+            const cubeBuffers = initBuffers(gl, cubePositions, cubeColors, cubeTypes);
+            const cubeProgram = constructFullShaderProgram(gl, cubeVertexShader, cubeFragmentShader);
+            finaliseProgram(cubeProgram, cubeBuffers, projectionMatrixCube, modelViewMatrixCube)
+            gl.drawArrays(gl.TRIANGLES, 0, cubeBuffers.vertexCount);
+        }
+
+        function setUniforms(gl, programInfo, shaderProgram, data, projectionMatrix, modelViewMatrix) {
+            gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
+            gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
+            
+            let sunPosMag = Math.sqrt(sunPos[0] ** 2 + sunPos[1] ** 2 + sunPos[2] ** 2);
+            let horizonPosMag = Math.sqrt(horizonPos[0] ** 2 + horizonPos[1] ** 2 + horizonPos[2] ** 2);
+
+            let sunPosLoc = gl.getUniformLocation(shaderProgram, 'sunPos');
+            gl.uniform3fv(sunPosLoc, sunPos);
+
+            let sunPosNormalLoc = gl.getUniformLocation(shaderProgram, 'sunPosNormal');
+            gl.uniform3fv(sunPosNormalLoc, sunPos.map(a => a / sunPosMag));
+
+            let horizonPosLoc = gl.getUniformLocation(shaderProgram, 'horizonPos');
+            gl.uniform3fv(horizonPosLoc, horizonPos);
+
+            let horizonPosNormalLoc = gl.getUniformLocation(shaderProgram, 'horizonPosNormal');
+            gl.uniform3fv(horizonPosLoc, horizonPos.map(a => a / horizonPosMag));
+
+            let sunColorLoc = gl.getUniformLocation(shaderProgram, 'sunColor');
+            gl.uniform4fv(sunColorLoc, sunColor);
+
+            let skyBrightLoc = gl.getUniformLocation(shaderProgram, 'skyBright');
+            gl.uniform4fv(skyBrightLoc, skyBright);
+
+            let skyDarkLoc = gl.getUniformLocation(shaderProgram, 'skyDark');
+            gl.uniform4fv(skyDarkLoc, skyDark);
+
+            let directionsLoc = gl.getUniformLocation(shaderProgram, 'directions');
+            gl.uniform1fv(directionsLoc, new Float32Array(directions));
+
+            Object.keys(data).forEach((key) => {
+                const uniformLocation = gl.getUniformLocation(shaderProgram, key);
+                gl.uniform1f(uniformLocation, data[key]);
+            });
+        }
+    
+        document.body.addEventListener('mousedown', (e) => {rotDt *= 100 * (e.ctrlKey ? -1 : 1)});
+        document.body.addEventListener('mouseup', (e) => {rotDt /= 100 * (rotDt < 0 ? -1 : 1)});
+    </script>
+</body>
+</html>

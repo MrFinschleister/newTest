@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <input type="text" id="inp">
+    <button onclick="start()">Start</button>
+    <script>
+        let startString = "The quick brown fox jumps over the lazy dog."
+
+
+
+        let articles = ["the", "a", "an"]
+
+        let conjunctions = ["for", "and", "nor", "but", "or", "yet", "so"]
+
+        let specialChars = ",.?!:;"
+
+        function start() {
+            let startString2 = ""
+
+            for (var x = 0; x < startString.length; x++) {
+                let char = startString.charAt(x)
+
+                if (specialChars.includes(char)) {
+                    startString2 += " "
+                }
+                startString2 += char
+            }
+
+            let str = startString2.split(" ")
+
+            let important = []
+            
+            for (var x = 0; x < str.length; x++) {
+                let sel = str[x].toLowerCase()
+                if (!articles.includes(sel) && !conjunctions.includes(sel)) {
+                    important.push(str[x])
+                }
+            }
+
+            alert(important)
+        }
+    </script>
+</body>
+</html>

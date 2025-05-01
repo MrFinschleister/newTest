@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+</head>
+<body>
+    <input type="text" id="inp">
+    <button onclick="start()">Start</button>
+    <script>
+        let startString = "The quick brown fox jumps over the lazy dog."
+
+        let articles = ["the", "a", "an"]
+
+        let conjunctions = ["for", "and", "nor", "but", "or", "yet", "so"]
+
+        let specialChars = ",.?!:;"
+
+        let groups = {}
+
+        function start() {
+            startString = document.getElementById('inp').value
+
+            let spl1 = specialChars.split("")
+
+            spl1.forEach((a) => {startString = startString.split(a).join("")})
+
+            alert(startString)
+        }
+    </script>
+</body>
+</html>
